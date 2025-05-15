@@ -17,40 +17,52 @@ url = st.text_input(
 start = st.button("Начать загрузку")
 
 if start and url:
-    output = StringIO()
+    rows = []
     page = 0
     limit = 20
-    with st.spinner("Загрузка..."):
+    progress_text = st.empty()
+    progress_bar = st.progress(0)
+    
+    with st.spinner("Загрузка данных..."):
         while True:
-            r = requests.get(url, params={"page": page, "limit": limit})
-            if r.status_code != 200:
-                st.error(f"Ошибка {r.status_code}")
+            try:
+                response = requests.get(url, params={"page": page, "limit": limit}, timeout=10)
+            except requests.exceptions.RequestException as e:
+                st.error(f"Ошибка при запросе: {e}")
                 break
-            d = r.json()
-            items = d.get("data")
-            if not items:
+                
+            if response.status_code != 200:
+                st.error(f"Ошибка на странице {page}: {response.status_code}")
                 break
-            output.write(r.text + "\n")
+                
+            try:
+                data = response.json()
+            except json.JSONDecodeError:
+                st.error("Ошибка при разборе JSON")
+                break
+                
+            hotels = data.get("data")
+            if not hotels:
+                st.success("Данные загружены полностью")
+                break
+                
+            rows.extend(hotels)
+            progress_text.text(f"Страница {page} — загружено {len(hotels)} объектов")
+            progress_bar.progress(min((page + 1)*limit, 1000)/1000)  # пример прогресса
+            
             page += 1
             time.sleep(0.5)
-        st.success("Загрузка завершена")
-
-    raw = output.getvalue()
-    parts = raw.strip().split('\n')
-    hotels = []
-    for part in parts:
-        try:
-            obj = json.loads(part)
-            if 'data' in obj:
-                hotels.extend(obj['data'])
-        except json.JSONDecodeError:
-            continue
-
-    df = pd.json_normalize(hotels)
-    pd.set_option('display.max_columns', None)
-
-    st.write("Пример данных:")
-    st.dataframe(df.head())
-
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("Загрузить результат", csv, file_name="hotels.csv", mime="text/csv")
+    
+    if rows:
+        df = pd.json_normalize(rows)
+        pd.set_option("display.max_columns", None)
+        st.write("Пример данных:")
+        st.dataframe(df.head())
+        
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="Скачать результат (CSV)",
+            data=csv,
+            file_name="hotels.csv",
+            mime="text/csv"
+        )
